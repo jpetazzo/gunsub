@@ -115,10 +115,13 @@ https://github.com/jpetazzo/gunsub
     since = None
     while True:
         next_since = time.time()
-        gunsub(github_user, github_password,
-               github_include_repos, github_exclude_repos,
-               since)
-        since = next_since
+        try:
+            gunsub(github_user, github_password,
+                   github_include_repos, github_exclude_repos,
+                   since)
+            since = next_since
+        except:
+            log.exception('Error in main loop!')
         if not interval:
             break
         log.debug('Sleeping for {0} seconds.'.format(interval))
