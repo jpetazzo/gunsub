@@ -106,8 +106,9 @@ https://github.com/jpetazzo/gunsub
         sys.exit(1)
     github_user = os.environ['GITHUB_USER']
     github_password = os.environ['GITHUB_PASSWORD']
-    github_include_repos = os.environ.get('GITHUB_INCLUDE_REPOS', '')
-    github_include_repos = github_include_repos.split(',')
+    github_include_repos = os.environ.get('GITHUB_INCLUDE_REPOS', None)
+    if github_include_repos:
+        github_include_repos = github_include_repos.split(',')
     github_exclude_repos = os.environ.get('GITHUB_EXCLUDE_REPOS', '')
     github_exclude_repos = github_exclude_repos.split(',')
     interval = os.environ.get('GITHUB_POLL_INTERVAL')
