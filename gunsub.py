@@ -119,8 +119,8 @@ https://github.com/jpetazzo/gunsub
     state_file = './next-since'
     # Read application state
     if os.path.isfile(state_file):
-        with open(state_file, 'r') as next_since_file:
-            since = float(next_since_file.read().replace('\n', ''))
+        with open(state_file) as next_since_file:
+            since = float(next_since_file.read().split()[0])
         log.info('Parsing events since {0}, {1}'
                  .format(time.strftime('%FT%TZ', time.gmtime(since)), since))
 
