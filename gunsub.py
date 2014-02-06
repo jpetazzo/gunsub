@@ -3,6 +3,7 @@ import httplib
 import json
 import logging
 import os
+import os.path
 import sys
 import time
 
@@ -114,12 +115,23 @@ https://github.com/jpetazzo/gunsub
     interval = os.environ.get('GITHUB_POLL_INTERVAL')
     interval = interval and int(interval)
     since = None
+
+    state_file = './next-since'
+    # Read application state
+    if os.path.isfile(state_file):
+        with open(state_file) as next_since_file:
+            since = float(next_since_file.read().split()[0])
+        log.info('Parsing events since {0}, {1}'
+                 .format(time.strftime('%FT%TZ', time.gmtime(since)), since))
+
     while True:
         next_since = time.time()
         try:
             gunsub(github_user, github_password,
                    github_include_repos, github_exclude_repos,
                    since)
+            with open(state_file, 'w') as next_since_file:
+                next_since_file.write(str(next_since))
             since = next_since
         except:
             log.exception('Error in main loop!')
