@@ -1,4 +1,5 @@
 import base64
+import fnmatch
 import httplib
 import json
 import logging
@@ -18,6 +19,16 @@ def iterpage():
     while True:
         yield page
         page += 1
+
+
+def repo_pattern_match(notification, pattern):
+    name = notification['repository'][
+        'full_name' if '/' in pattern else 'name']
+    return fnmatch.fnmatchcase(name, pattern)
+
+
+def repo_list_match(notification, patterns):
+    return any(repo_pattern_match(notification, p) for p in patterns)
 
 
 def gunsub(github_user, github_password,
@@ -60,12 +71,11 @@ def gunsub(github_user, github_password,
         for notification in notifications:
             # Check inclusion/exclusion rules.
             repo_name = notification['repository']['name']
-            if github_include_repos:
-                if repo_name not in github_include_repos:
-                    continue
-            if github_exclude_repos:
-                if repo_name in github_exclude_repos:
-                    continue
+            if github_include_repos and \
+               not repo_list_match(notification, github_include_repos):
+                continue
+            if repo_list_match(notification, github_exclude_repos):
+                continue
             # If we were initially subscribed because mentioned/created/etc,
             # don't touch the subscription information.
             if notification['reason'] != 'subscribed':
