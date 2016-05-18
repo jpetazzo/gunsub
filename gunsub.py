@@ -1,3 +1,4 @@
+import argparse
 import base64
 import fnmatch
 import httplib
@@ -5,12 +6,11 @@ import json
 import logging
 import os
 import sys
+from textwrap import wrap
 import time
 
 
 log = logging
-level = os.environ.get('DEBUG') and logging.DEBUG or logging.INFO
-logging.basicConfig(level=level)
 
 
 def iterpage():
@@ -100,29 +100,61 @@ def gunsub(github_user, github_password,
              .format(page, count))
 
 
-if __name__ == '__main__':
-    if ('GITHUB_USER' not in os.environ
-            or 'GITHUB_PASSWORD' not in os.environ):
-        print '''
-You must set environment variables GITHUB_USER and GITHUB_PASSWORD.
-You might also set GITHUB_INCLUDE_REPOS and GITHUB_EXCLUDE_REPOS to
-comma-separated lists of repos to include or exclude.
-If you set GITHUB_POLL_INTERVAL, the program will run in a loop and
-poll github notifications on the configured interval (in seconds).
+def wrap_paragraphs(paragraphs):
+    return '\n\n'.join('\n'.join(wrap(paragraph))
+                       for paragraph in paragraphs.split('\n'))
 
-To read more about gunsub, check is project page on github:
-https://github.com/jpetazzo/gunsub
-'''
-        sys.exit(1)
-    github_user = os.environ['GITHUB_USER']
-    github_password = os.environ['GITHUB_PASSWORD']
-    github_include_repos = os.environ.get('GITHUB_INCLUDE_REPOS', None)
-    if github_include_repos:
-        github_include_repos = github_include_repos.split(',')
-    github_exclude_repos = os.environ.get('GITHUB_EXCLUDE_REPOS', '')
-    github_exclude_repos = github_exclude_repos.split(',')
-    interval = os.environ.get('GITHUB_POLL_INTERVAL')
+
+def parse_args():
+    description=wrap_paragraphs(
+        'Unsubscribe automatically from Github threads after '
+        'the initial thread notification')
+    epilog = wrap_paragraphs(
+        'Repository include and exclude names can optionally starts with '
+                                 '"owner/" or use shell wildcards.\n'
+                                 'To read more about gunsub, check its '
+                                 'project page on Github: '
+                                 'http://github.com/jpetazzo/gunsub.')
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=description, epilog=epilog)
+        
+    parser.add_argument('--debug', action='store_true',
+                        help='Enable debug logging')
+    user_default = os.environ.get('GITHUB_USER', None)
+    parser.add_argument('--user', action='store', default=user_default,
+                        required=not user_default,
+                        help='Github username (or set $GITHUB_USER')
+    password_default = os.environ.get('GITHUB_PASSWORD', None)
+    parser.add_argument('--password', action='store', default=password_default,
+                        required=not password_default,
+                        help='Github password (or set $GITHUB_PASSWORD')
+    parser.add_argument('--interval', action='store', type=int,
+                        default=int(os.environ.get('GITHUB_POLL_INTERVAL', 0)),
+                        help='Poll interval in seconds for continuous '
+                        'operation (or set $GITHUB_POLL_INTERVAL)')
+    include_default = os.environ.get('GITHUB_INCLUDE_REPOS', '').split(',')
+    parser.add_argument('--include', action='append', default=include_default,
+                        help='List of repositories to include (or set '
+                        '$GITHUB_INCLUDE_REPOS to comma-separated list)')
+    exclude_default = os.environ.get('GITHUB_EXCLUDE_REPOS', '').split(',')
+    parser.add_argument('--exclude', action='append', default=exclude_default,
+                        help='List of repositories to exclude (or set '
+                        '$GITHUB_EXCLUDE_REPOS to comma-separated list)')
+
+    return parser.parse_args()
+
+
+def main(args):
+    github_user = args.user
+    github_password = args.password
+    github_include_repos = args.include
+    github_exclude_repos = args.exclude
+    interval = args.interval
     interval = interval and int(interval)
+
+    logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO)
+
     since = None
 
     state_file = './next-since'
@@ -148,3 +180,8 @@ https://github.com/jpetazzo/gunsub
             break
         log.debug('Sleeping for {0} seconds.'.format(interval))
         time.sleep(interval)
+
+
+if __name__ == '__main__':
+    args = parse_args()
+    main(args)
