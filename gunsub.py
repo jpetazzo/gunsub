@@ -4,7 +4,6 @@ import httplib
 import json
 import logging
 import os
-import os.path
 import sys
 import time
 
