@@ -33,7 +33,7 @@ def repo_list_match(notification, patterns):
 
 def gunsub(github_user, github_password,
            github_include_repos=[], github_exclude_repos=[],
-           since=None):
+           since=None, dryrun=False):
 
     def req(uri, method='GET', body=None, headers={}):
         auth = base64.encodestring('{0}:{1}'
@@ -89,12 +89,13 @@ def gunsub(github_user, github_password,
                 # ... And we therefore unsubscribe from further notifications
                 subject_url = notification['subject']['url']
                 log.info('Unsubscribing from {0}...'.format(subject_url))
-                result = req(subscription_uri, 'PUT', dict(subscribed=False,
-                                                           ignored=True))
-                if 'subscribed' not in result:
-                    log.warning('When unsubscribing from {0}, I got this: '
-                                '{1!r} and it does not contain {2!r}.'
-                                .format(subject_url, result, 'subscribed'))
+                if not dryrun:
+                    result = req(subscription_uri, 'PUT',
+                                 dict(subscribed=False, ignored=True))
+                    if 'subscribed' not in result:
+                        log.warning('When unsubscribing from {0}, I got this: '
+                                    '{1!r} and it does not contain {2!r}.'
+                                    .format(subject_url, result, 'subscribed'))
                 count += 1
     log.info('Done; had to go through {0} page(s) of notifications, '
              'and unsubscribed from {1} thread(s).'
@@ -122,6 +123,8 @@ def parse_args():
         
     parser.add_argument('--debug', action='store_true',
                         help='Enable debug logging')
+    parser.add_argument('--dryrun', action='store_true',
+                        help='Say what would be done without doing it')
     user_default = os.environ.get('GITHUB_USER', None)
     parser.add_argument('--user', action='store', default=user_default,
                         required=not user_default,
@@ -178,9 +181,10 @@ def main(args):
         try:
             gunsub(github_user, github_password,
                    github_include_repos, github_exclude_repos,
-                   since)
-            with open(state_file, 'w') as next_since_file:
-                next_since_file.write(str(next_since))
+                   since, dryrun=args.dryrun)
+            if not args.dryrun:
+                with open(state_file, 'w') as next_since_file:
+                    next_since_file.write(str(next_since))
             since = next_since
         except:
             log.exception('Error in main loop!')
