@@ -5,6 +5,7 @@ import httplib
 import json
 import logging
 import os
+from pandas import Timestamp
 import sys
 from textwrap import wrap
 import time
@@ -141,6 +142,9 @@ def parse_args():
     parser.add_argument('--exclude', action='append', default=exclude_default,
                         help='List of repositories to exclude (or set '
                         '$GITHUB_EXCLUDE_REPOS to comma-separated list)')
+    parser.add_argument('--since', metavar='TIME-STRING', action='store',
+                        type=Timestamp, help='Examine notifications starting '
+                        'at the specified time')
 
     return parser.parse_args()
 
@@ -158,12 +162,16 @@ def main(args):
     since = None
 
     state_file = './next-since'
-    # Read application state
-    if os.path.isfile(state_file):
-        with open(state_file) as next_since_file:
-            since = float(next_since_file.read().split()[0])
-        log.info('Parsing events since {0}, {1}'
-                 .format(time.strftime('%FT%TZ', time.gmtime(since)), since))
+
+    if args.since:
+        since = int(args.since.strftime('%s'))
+    else:
+        # Read application state
+        if os.path.isfile(state_file):
+            with open(state_file) as next_since_file:
+                since = float(next_since_file.read().split()[0])
+                log.info('Parsing events since {0}, {1}'.format(
+                    time.strftime('%FT%TZ', time.gmtime(since)), since))
 
     while True:
         next_since = time.time()
