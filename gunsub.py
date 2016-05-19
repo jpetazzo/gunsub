@@ -1,5 +1,7 @@
 import argparse
 import base64
+import email
+import email.mime.text
 import fnmatch
 import httplib
 import json
@@ -38,11 +40,7 @@ def send_email(address, notification):
             notification_type))
         return
 
-    msg = dedent(u"""
-        From: Gunsub <{0}>
-        To: {0}
-        Subject: Unsubscribed from "{1}"
-
+    body = dedent(u"""
         You have been unsubscribed from the {2} with the subject
         "{1}".
 
@@ -50,9 +48,15 @@ def send_email(address, notification):
        """).lstrip().format(
            address, title, notification_type.lower(), url)
 
+    msg = email.mime.text.MIMEText(body, 'plain', 'utf-8')
+    msg['Subject'] = u'Unsubscribed from "{}"'.format(title)
+    msg['From'] = 'Gunsub <{}>'.format(address)
+    msg['To'] = address
+    
     smtp = smtplib.SMTP('localhost')
-    smtp.sendmail(address, [address], msg)
+    smtp.sendmail(address, [address], msg.as_string())
     smtp.quit()
+
 
 def repo_pattern_match(notification, pattern):
     name = notification['repository'][
