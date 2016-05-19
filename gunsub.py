@@ -38,7 +38,7 @@ def send_email(address, notification):
             notification_type))
         return
 
-    msg = dedent("""
+    msg = dedent(u"""
         From: Gunsub <{0}>
         To: {0}
         Subject: Unsubscribed from "{1}"
