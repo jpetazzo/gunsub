@@ -97,7 +97,7 @@ def gunsub(github_user, github_password,
 
     count = 0
     for page in iterpage():
-        notifications = req('/notifications?page={0}{1}'
+        notifications = req('/notifications?all=true&page={0}{1}'
                             .format(page, since_qs))
         if not notifications:
             break
