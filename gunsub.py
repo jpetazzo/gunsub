@@ -111,7 +111,17 @@ def gunsub(github_user, github_password,
             if notification['subject']['type'] == 'Release':
                 continue
             # Check inclusion/exclusion rules.
-            repo_name = notification['repository']['name']
+            try:
+                repo_name = notification['repository']['name']
+            except TypeError:
+                # I once got "TypeError: string indices must be integers" from
+                # the line of code above, which I couldn't debug because the
+                # resulting log message didn't say what was actually in the
+                # notification, so logging it here for the next time it
+                # happens.
+                log.error('Unexpected notification contents: {}'.format(
+                    notification))
+                raise
             if github_include_repos and \
                not repo_list_match(notification, github_include_repos):
                 continue
