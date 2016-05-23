@@ -106,12 +106,12 @@ def gunsub(github_user, github_password,
         if not notifications:
             break
         for notification in notifications:
-            # Releases don't have subscribe or unsubscribe buttons on the
-            # Github web site, so don't mess with them.
-            if notification['subject']['type'] == 'Release':
-                continue
             # Check inclusion/exclusion rules.
             try:
+                # Releases don't have subscribe or unsubscribe buttons on the
+                # Github web site, so don't mess with them.
+                if notification['subject']['type'] == 'Release':
+                    continue
                 repo_name = notification['repository']['name']
             except TypeError:
                 # I once got "TypeError: string indices must be integers" from
