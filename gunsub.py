@@ -1,16 +1,20 @@
+import argparse
 import base64
+import email
+import email.mime.text
+import fnmatch
 import httplib
 import json
 import logging
 import os
-import os.path
+from pandas import Timestamp
+import smtplib
 import sys
+from textwrap import wrap, dedent
 import time
 
 
 log = logging
-level = os.environ.get('DEBUG') and logging.DEBUG or logging.INFO
-logging.basicConfig(level=level)
 
 
 def iterpage():
@@ -20,9 +24,53 @@ def iterpage():
         page += 1
 
 
+def send_email(address, notification):
+    notification_type = notification['subject']['type']
+    title = notification['subject']['title']
+    url = notification['subject']['url'].replace('api.', '', 1).\
+        replace('/repos/', '/', 1)
+    if notification_type == 'PullRequest':
+        url = url.replace('/pulls/', '/pull/', 1)
+    elif notification_type == 'Issue':
+        pass
+    elif notification_type == 'Commit':
+        url = url.replace('/commits/', '/commit/', 1)
+    else:
+        log.error('Unknown notification type for emailing: {}'.format(
+            notification_type))
+        return
+
+    body = dedent(u"""
+        You have been unsubscribed from the {2} with the subject
+        "{1}".
+
+        Visit {3} to resubscribe.
+       """).lstrip().format(
+           address, title, notification_type.lower(), url)
+
+    msg = email.mime.text.MIMEText(body, 'plain', 'utf-8')
+    msg['Subject'] = u'Unsubscribed from "{}"'.format(title)
+    msg['From'] = 'Gunsub <{}>'.format(address)
+    msg['To'] = address
+    
+    smtp = smtplib.SMTP('localhost')
+    smtp.sendmail(address, [address], msg.as_string())
+    smtp.quit()
+
+
+def repo_pattern_match(notification, pattern):
+    name = notification['repository'][
+        'full_name' if '/' in pattern else 'name']
+    return fnmatch.fnmatchcase(name, pattern)
+
+
+def repo_list_match(notification, patterns):
+    return any(repo_pattern_match(notification, p) for p in patterns)
+
+
 def gunsub(github_user, github_password,
            github_include_repos=[], github_exclude_repos=[],
-           since=None):
+           since=None, dryrun=False, email=None):
 
     def req(uri, method='GET', body=None, headers={}):
         auth = base64.encodestring('{0}:{1}'
@@ -53,19 +101,32 @@ def gunsub(github_user, github_password,
 
     count = 0
     for page in iterpage():
-        notifications = req('/notifications?page={0}{1}'
+        notifications = req('/notifications?all=true&page={0}{1}'
                             .format(page, since_qs))
         if not notifications:
             break
         for notification in notifications:
             # Check inclusion/exclusion rules.
-            repo_name = notification['repository']['name']
-            if github_include_repos:
-                if repo_name not in github_include_repos:
+            try:
+                # Releases don't have subscribe or unsubscribe buttons on the
+                # Github web site, so don't mess with them.
+                if notification['subject']['type'] == 'Release':
                     continue
-            if github_exclude_repos:
-                if repo_name in github_exclude_repos:
-                    continue
+                repo_name = notification['repository']['name']
+            except TypeError:
+                # I once got "TypeError: string indices must be integers" from
+                # the line of code above, which I couldn't debug because the
+                # resulting log message didn't say what was actually in the
+                # notification, so logging it here for the next time it
+                # happens.
+                log.error('Unexpected notification contents: {}'.format(
+                    notification))
+                raise
+            if github_include_repos and \
+               not repo_list_match(notification, github_include_repos):
+                continue
+            if repo_list_match(notification, github_exclude_repos):
+                continue
             # If we were initially subscribed because mentioned/created/etc,
             # don't touch the subscription information.
             if notification['reason'] != 'subscribed':
@@ -79,59 +140,106 @@ def gunsub(github_user, github_password,
                 # ... And we therefore unsubscribe from further notifications
                 subject_url = notification['subject']['url']
                 log.info('Unsubscribing from {0}...'.format(subject_url))
-                result = req(subscription_uri, 'PUT', dict(subscribed=False,
-                                                           ignored=True))
-                if 'subscribed' not in result:
-                    log.warning('When unsubscribing from {0}, I got this: '
-                                '{1!r} and it does not contain {2!r}.'
-                                .format(subject_url, result, 'subscribed'))
+                if not args.dryrun:
+                    result = req(subscription_uri, 'PUT',
+                                 dict(subscribed=False, ignored=True))
+                    if 'subscribed' not in result:
+                        log.warning('When unsubscribing from {0}, I got this: '
+                                    '{1!r} and it does not contain {2!r}.'
+                                    .format(subject_url, result, 'subscribed'))
+                if email:
+                    send_email(email, notification)
                 count += 1
     log.info('Done; had to go through {0} page(s) of notifications, '
              'and unsubscribed from {1} thread(s).'
              .format(page, count))
 
 
-if __name__ == '__main__':
-    if ('GITHUB_USER' not in os.environ
-            or 'GITHUB_PASSWORD' not in os.environ):
-        print '''
-You must set environment variables GITHUB_USER and GITHUB_PASSWORD.
-You might also set GITHUB_INCLUDE_REPOS and GITHUB_EXCLUDE_REPOS to
-comma-separated lists of repos to include or exclude.
-If you set GITHUB_POLL_INTERVAL, the program will run in a loop and
-poll github notifications on the configured interval (in seconds).
+def wrap_paragraphs(paragraphs):
+    return '\n\n'.join('\n'.join(wrap(paragraph))
+                       for paragraph in paragraphs.split('\n'))
 
-To read more about gunsub, check is project page on github:
-https://github.com/jpetazzo/gunsub
-'''
-        sys.exit(1)
-    github_user = os.environ['GITHUB_USER']
-    github_password = os.environ['GITHUB_PASSWORD']
-    github_include_repos = os.environ.get('GITHUB_INCLUDE_REPOS', None)
-    if github_include_repos:
-        github_include_repos = github_include_repos.split(',')
-    github_exclude_repos = os.environ.get('GITHUB_EXCLUDE_REPOS', '')
-    github_exclude_repos = github_exclude_repos.split(',')
-    interval = os.environ.get('GITHUB_POLL_INTERVAL')
+
+def parse_args():
+    description=wrap_paragraphs(
+        'Unsubscribe automatically from Github threads after '
+        'the initial thread notification')
+    epilog = wrap_paragraphs(
+        'Repository include and exclude names can optionally starts with '
+                                 '"owner/" or use shell wildcards.\n'
+                                 'To read more about gunsub, check its '
+                                 'project page on Github: '
+                                 'http://github.com/jpetazzo/gunsub.')
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=description, epilog=epilog)
+        
+    parser.add_argument('--debug', action='store_true',
+                        help='Enable debug logging')
+    parser.add_argument('--dryrun', action='store_true',
+                        help='Say what would be done without doing it')
+    user_default = os.environ.get('GITHUB_USER', None)
+    parser.add_argument('--user', action='store', default=user_default,
+                        required=not user_default,
+                        help='Github username (or set $GITHUB_USER')
+    password_default = os.environ.get('GITHUB_PASSWORD', None)
+    parser.add_argument('--password', action='store', default=password_default,
+                        required=not password_default,
+                        help='Github password (or set $GITHUB_PASSWORD')
+    parser.add_argument('--interval', action='store', type=int,
+                        default=int(os.environ.get('GITHUB_POLL_INTERVAL', 0)),
+                        help='Poll interval in seconds for continuous '
+                        'operation (or set $GITHUB_POLL_INTERVAL)')
+    include_default = os.environ.get('GITHUB_INCLUDE_REPOS', '').split(',')
+    parser.add_argument('--include', action='append', default=include_default,
+                        help='List of repositories to include (or set '
+                        '$GITHUB_INCLUDE_REPOS to comma-separated list)')
+    exclude_default = os.environ.get('GITHUB_EXCLUDE_REPOS', '').split(',')
+    parser.add_argument('--exclude', action='append', default=exclude_default,
+                        help='List of repositories to exclude (or set '
+                        '$GITHUB_EXCLUDE_REPOS to comma-separated list)')
+    parser.add_argument('--since', metavar='TIME-STRING', action='store',
+                        type=Timestamp, help='Examine notifications starting '
+                        'at the specified time')
+    parser.add_argument('--email', metavar='ADDRESS', action='store',
+                        help='Email address to notify about unsubscribes')
+
+    return parser.parse_args()
+
+
+def main(args):
+    github_user = args.user
+    github_password = args.password
+    github_include_repos = args.include
+    github_exclude_repos = args.exclude
+    interval = args.interval
     interval = interval and int(interval)
+
+    logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO)
+
     since = None
 
     state_file = './next-since'
-    # Read application state
-    if os.path.isfile(state_file):
-        with open(state_file) as next_since_file:
-            since = float(next_since_file.read().split()[0])
-        log.info('Parsing events since {0}, {1}'
-                 .format(time.strftime('%FT%TZ', time.gmtime(since)), since))
+
+    if args.since:
+        since = int(args.since.strftime('%s'))
+    else:
+        # Read application state
+        if os.path.isfile(state_file):
+            with open(state_file) as next_since_file:
+                since = float(next_since_file.read().split()[0])
+                log.info('Parsing events since {0}, {1}'.format(
+                    time.strftime('%FT%TZ', time.gmtime(since)), since))
 
     while True:
         next_since = time.time()
         try:
             gunsub(github_user, github_password,
                    github_include_repos, github_exclude_repos,
-                   since)
-            with open(state_file, 'w') as next_since_file:
-                next_since_file.write(str(next_since))
+                   since, dryrun=args.dryrun, email=args.email)
+            if not args.dryrun:
+                with open(state_file, 'w') as next_since_file:
+                    next_since_file.write(str(next_since))
             since = next_since
         except:
             log.exception('Error in main loop!')
@@ -139,3 +247,8 @@ https://github.com/jpetazzo/gunsub
             break
         log.debug('Sleeping for {0} seconds.'.format(interval))
         time.sleep(interval)
+
+
+if __name__ == '__main__':
+    args = parse_args()
+    main(args)
